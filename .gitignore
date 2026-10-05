@@ -1,0 +1,27 @@
+# Node / Next.js
+frontend/node_modules/
+frontend/.next/
+frontend/.vercel/
+frontend/next-env.d.ts
+
+# 실제 API 키가 들어가는 로컬 전용 환경변수 파일 (frontend/.env는 플레이스홀더 템플릿이라 추적함)
+frontend/.env.local
+frontend/.env.*.local
+
+# 카카오 JS 키가 하드코딩된 디버그용 스크래치 파일 (앱 구조에 포함 안 됨)
+frontend/public/test-map.html
+
+# Python
+model/__pycache__/
+*.pyc
+.venv/
+
+# 학습 중간 캐시 (용량 큼, 매번 재생성됨)
+data/speed_raw.parquet
+
+# 원본 엑셀/CSV는 용량이 크면 git에 올리지 말고
+# 아래 줄의 주석을 해제해 제외하세요 (대신 data/README.md 참고)
+# data/*.xlsx
+# data/*.csv
+
+.DS_Store
