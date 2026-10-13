@@ -1,124 +1,114 @@
-# 안 멈추는 길 — 설정 가이드
+# ClearPath
 
-PRD("안 멈추는 길 — MVP") 기준 구현. PRD 3절은 "실험상 모델 차이가 작아
-프로파일만 쓴다"고 했지만, 이 레포는 **LightGBM 예측값을 그대로 서비스에
-사용**합니다 (`model/train.py`). 평균(mean)·P90 두 개의 LightGBM 모델을
-학습해서 모든 (링크×요일×시간대) 조합의 예측치를 `frontend/data/graph.json`에
-저장하고, Next.js API 라우트는 이 파일만 읽어서 그래프를 만듭니다 — 런타임에
-모델을 돌리지 않는 건 PRD와 동일합니다.
+서울 주요도로 실측 데이터를 기반으로 예측한 통행시간으로 "안 늦는 길"을 찾아
+주고, 이를 카카오내비 경로와 비교해 보여주는 지도 서비스입니다. 지도를 두 번
+클릭(출발→도착)하면 두 지점을 가장 가까운 교차로에 스냅한 뒤, 요일·시간대별
+예측 통행시간을 가중치로 한 경로를 계산해 지도에 표시합니다.
 
-프론트엔드(Next.js)와 경로 탐색 로직(과거 FastAPI 백엔드)이 하나의 Vercel
-배포로 합쳐져 있습니다. 별도 서버가 없으므로 콜드스타트나 배포 파이프라인
-이원화 문제가 없습니다.
+## 주요 기능
+
+- **지도 클릭 기반 출발/도착 선택**: 카카오맵 위에서 두 번 클릭하면 바로
+  경로가 계산됩니다 (`frontend/app/page.tsx`).
+- **요일·시간대 선택**: 요일(월~일)과 시간(0~23시)을 바꿔가며 같은 구간의
+  예측 통행시간이 어떻게 달라지는지 비교할 수 있습니다.
+- **예측 기반 경로 탐색**: 거리 최단, 평균 통행시간 최단, P90(늦어도 이 정도)
+  최단 세 가지 가중치로 다익스트라 경로를 계산합니다 (`frontend/app/lib/graph.ts`).
+- **카카오내비 경로와의 공정 비교**: 카카오 "미래 운행 정보 길찾기" API로 받은
+  경로를 자체 그래프에 맵매칭해, 같은 모델·같은 시간대 기준으로 예상 소요시간을
+  환산해서 비교합니다. 매칭 커버리지가 일정 비율(65%) 이상일 때만 비교 카드를
+  보여줍니다.
+- **교차로 스냅 경고 / 신호등 통과 수 표시**: 클릭한 좌표가 실제 교차로에서
+  멀리 떨어져 있으면 경고를 표시하고, 각 경로가 통과하는 신호등 교차로 수를
+  계산해 보여줍니다.
+- **노드 이름 검색 API**: `/api/nodes?q=` 로 교차로 이름 부분 검색을 지원합니다
+  (현재 UI에는 미연결).
+- **정기 재학습 파이프라인**: GitHub Actions가 주기적으로 LightGBM 모델을
+  재학습하고, 예측 결과(`graph.json`)를 커밋해 Vercel 재배포를 트리거합니다.
+
+## 기술 스택
+
+**프론트엔드**
+- Next.js 15 (App Router), React 18, TypeScript
+- Kakao Maps JavaScript SDK (지도/마커/폴리라인)
+- `proj4` — EPSG:4326(WGS84) ↔ EPSG:5181(GRS80 TM) 좌표 변환
+
+**백엔드(API)**
+- Next.js Route Handlers (`app/api/route`, `app/api/nodes`)로 프론트와 동일한
+  배포에 통합. 자체 구현한 바이너리 힙 기반 다익스트라로 경로 탐색
+- 카카오모빌리티 "미래 운행 정보 길찾기" REST API 연동
+
+**모델 학습 (`model/`)**
+- Python, LightGBM(평균 예측 L2 모델 + P90 quantile 모델)
+- pandas / numpy / scipy / scikit-learn(DBSCAN, Ridge) / pyproj / openpyxl / pyarrow
+- 신호 교차로 지연 추정을 위한 Ridge 회귀(노드 고정효과)
+
+**CI/자동화**
+- GitHub Actions (`retrain.yml`): 매일 정해진 시각에 `model/train.py`를 실행해
+  `frontend/data/graph.json`을 재생성하고 자동 커밋
+
+## 프로젝트 구조
 
 ```
 .
+├── data/                       # 모델 학습용 원본 데이터
+│   ├── speed_05~08.xlsx        # 시간대별 속도 데이터
+│   ├── vertex.xlsx             # 링크(도로) 좌표 정보
+│   └── signals.csv             # 신호등 위치 정보
+│
 ├── model/
-│   ├── train.py            # LightGBM(mean, p90) 학습 → frontend/data/graph.json 생성
+│   ├── train.py                 # 피처 생성 → LightGBM(mean, p90) 학습
+│   │                             # → frontend/data/graph.json 생성
 │   └── requirements.txt
-├── data/                    # 원본 데이터 (speed_*.xlsx, vertex.xlsx, signals.csv)
+│
 ├── .github/workflows/
-│   └── retrain.yml          # 주기적으로 train.py 실행 → frontend/data/graph.json 커밋
-└── frontend/                 # Next.js 15 App Router (Vercel 배포)
-    ├── app/page.tsx           # 지도 클릭 → 경로 4종 비교 화면 (PRD 2절)
-    ├── app/constants.ts       # 경로별 색상·굵기 (PRD 2.2)
-    ├── app/types.ts
-    ├── app/globals.css
-    ├── app/lib/graph.ts       # 그래프 로드·좌표 스냅·다익스트라 (과거 app.py)
-    ├── app/lib/kakao.ts       # 카카오 길찾기 API 호출
-    ├── app/api/route/route.ts # GET /api/route
-    ├── app/api/nodes/route.ts # GET /api/nodes
-    └── data/graph.json        # train.py가 채우는 그래프 데이터
+│   └── retrain.yml              # 주기적으로 train.py 실행 → graph.json 커밋
+│
+└── frontend/                    # Next.js 15 App Router (Vercel 배포)
+    ├── app/
+    │   ├── page.tsx              # 지도 클릭 → 경로 계산·비교 화면
+    │   ├── layout.tsx
+    │   ├── globals.css
+    │   ├── constants.ts          # 경로 스타일(색상/굵기), 매칭 커버리지 기준값
+    │   ├── types.ts              # API 응답 타입
+    │   ├── lib/
+    │   │   ├── graph.ts          # graph.json 로드, 좌표 스냅, 다익스트라,
+    │   │   │                     # 카카오 경로 맵매칭
+    │   │   └── kakao.ts          # 카카오 "미래 운행 정보 길찾기" API 호출
+    │   └── api/
+    │       ├── route/route.ts    # GET /api/route — 경로 3종 + 카카오 비교
+    │       └── nodes/route.ts    # GET /api/nodes — 교차로 이름 검색
+    └── data/
+        └── graph.json            # train.py가 생성하는 그래프(노드·링크·예측치)
 ```
 
-## 동작 원리 (PRD 3절)
+## 데이터 흐름
 
-1. **GitHub Actions**가 주기적으로 `model/train.py`를 실행:
-   - 노트북 1~2절과 동일하게 데이터 로드 → 피처 생성 (정적 속성, 교차로 지연 δ,
-     프로파일 bl/bp90/bsd 등)
-   - LightGBM 두 개 학습: `mean`(L2) / `p90`(quantile α=0.9)
-   - 실시간엔 lag(방금 전 실측)를 알 수 없으므로, 예측용 피처의 lag1/lag7/lag14 등은
-     전부 프로파일 평균(bl)으로 채운 뒤 전체 (링크×요일×시간대) 그리드에 대해 예측
-   - 결과를 `frontend/data/graph.json`으로 저장 → 자동 커밋
-2. **Vercel**이 그 커밋을 받아 Next.js를 재배포 (`app/lib/graph.ts`가 빌드 타임에
-   `graph.json`을 정적 import로 읽어 그래프 구성 — LightGBM 자체는 Vercel에서
-   돌지 않음)
-3. 사용자가 지도를 2번 클릭하면 `/api/route`를 호출:
-   - 두 좌표를 가장 가까운 교차로로 스냅(선형 탐색 + EPSG:5181 투영)
-   - 다익스트라 3회 (weight=length/mean/p90, 직접 구현한 바이너리 힙 기반) →
-     최단거리·최단시간·안늦는길
-   - 카카오 길찾기 API 호출 → 소요시간 비교
-   - 프론트가 4개 경로를 지도에 그리고, "카카오 대비 N분 단축" 카드를 표시
+1. `model/train.py`가 `data/` 아래의 속도·좌표·신호등 원본 데이터를 읽어
+   링크(도로 구간) 단위 피처를 만들고, LightGBM으로 (링크 × 요일 × 시간대)
+   조합별 평균·P90 통행시간을 예측합니다.
+2. 예측 결과는 `frontend/data/graph.json`에 노드(교차로 좌표·신호등 여부)와
+   링크(길이·좌표·시간대별 예측치) 형태로 저장됩니다.
+3. Next.js는 빌드 시 이 파일을 정적 import로 읽어 `frontend/app/lib/graph.ts`의
+   그래프 자료구조를 구성합니다 — 런타임에 Python/LightGBM을 호출하지 않습니다.
+4. 사용자가 지도를 두 번 클릭하면 `/api/route`가 좌표를 가장 가까운 교차로로
+   스냅하고, 거리·평균 시간·P90 시간 세 가지 가중치로 다익스트라를 돌려 경로를
+   반환합니다. 동시에 카카오 API로 받은 경로를 같은 그래프에 맵매칭해 비교용
+   수치를 계산합니다.
 
-## 1. GitHub에 올리기
-
-```bash
-cd project폴더
-git init && git add . && git commit -m "init: 안 멈추는 길 MVP"
-git remote add origin https://github.com/<your-id>/<repo-name>.git
-git branch -M main && git push -u origin main
-```
-
-## 2. 데이터 올리기
-
-`data/`에 `speed_05~08.xlsx`, `vertex.xlsx`, `signals.csv`를 넣고 커밋
-(자세한 설명은 `data/README.md`). 파일이 크면 Git LFS 사용을 권장합니다.
-
-## 3. GitHub Actions 1회 수동 실행
-
-레포 → **Actions** → `Retrain LightGBM profiles` → **Run workflow**.
-성공하면 `frontend/data/graph.json`이 실제 데이터로 갱신되어 자동 커밋됩니다.
-(지금은 A-B-C/A-D-C 더미 테스트 그래프가 들어있어서 빌드는 되지만 실제
-도로 데이터는 아닙니다.)
-
-주기는 `.github/workflows/retrain.yml`의 `cron`으로 조절 (기본: 매일 KST 새벽 3시 10분).
-
-## 4. Vercel에 올리기
-
-1. [vercel.com](https://vercel.com) → **Add New Project** → 레포 선택
-2. **Root Directory**를 `frontend`로 지정
-3. 환경변수 2개 추가
-   - `KAKAO_REST_API_KEY` = 카카오 디벨로퍼스 **REST API 키** (서버사이드 전용,
-     `NEXT_PUBLIC_` 접두사 없이 등록 — 클라이언트에 노출되지 않음)
-   - `NEXT_PUBLIC_KAKAO_JS_KEY` = 카카오 디벨로퍼스 **JavaScript 키** (지도 표시용)
-4. **카카오 콘솔 → 내 애플리케이션 → 플랫폼 → Web**에 `http://localhost:3000`과
-   Vercel 배포 도메인을 등록해야 지도가 뜹니다.
-5. Deploy
-
-이후 Actions가 `frontend/data/graph.json`을 갱신해 push할 때마다 Vercel이
-자동 재배포합니다.
-
-## 5. 로컬에서 테스트
+## 로컬 실행
 
 ```bash
 # 1) 모델 학습 (data/ 폴더에 원본 파일 필요)
-cd model && pip install -r requirements.txt
+cd model
+pip install -r requirements.txt
 DATA_DIR=../data OUT_DIR=../frontend/data python train.py
 
-# 2) 프론트 + API
+# 2) 프론트엔드 + API
 cd ../frontend
 npm install
 cp .env .env.local   # KAKAO_REST_API_KEY, NEXT_PUBLIC_KAKAO_JS_KEY 값 채우기
 npm run dev
 ```
 
-`http://localhost:3000`에서 지도를 두 번 클릭해 출발·도착을 찍고 비교해보세요.
-
----
-
-## PRD와 다른 점 / 참고
-
-- **PRD 3절 "프로파일만 사용"과 달리 LightGBM 예측값을 그대로 씁니다.**
-  `graph.json`의 `profile` 배열이 어떻게 만들어졌는지 API 라우트는 신경 쓰지
-  않으므로, 나중에 다시 "단순 프로파일"로 되돌리고 싶으면 `model/train.py`만
-  바꾸면 됩니다(API·프론트는 그대로).
-- **모바일 바텀시트**는 "탭해서 펼치고 접는" 수준으로 단순화했습니다. 실제
-  드래그 제스처(관성 스크롤 등)가 필요하면 `frontend/app/page.tsx`의
-  `.side-panel`에 포인터 이벤트 기반 드래그 로직을 추가하세요.
-- **노드 이름 검색 자동완성**(`/api/nodes?q=`)은 API로 준비돼 있지만,
-  현재 프론트는 "지도 클릭"만 구현했습니다. 주소 검색창을 추가하려면
-  이 API를 그대로 쓰면 됩니다.
-- 데이터가 커서 `frontend/data/graph.json`이 무거워지면(링크 수·요일·시간대
-  조합이 많아질수록) Vercel 서버리스 함수 번들이 커질 수 있습니다. 필요하면
-  profile 소수점을 더 줄이거나, nodes/links/profile을 여러 파일로 분리하는
-  방식을 검토하세요.
+`http://localhost:3000`에서 지도를 두 번 클릭해 출발·도착을 찍으면 경로가
+계산됩니다.

@@ -244,7 +244,7 @@ export default function Home() {
       <div className="side-panel">
         <div className="drag-handle" />
         <div className="side-header">
-          <h1>안 멈추는 길</h1>
+          <h1>ClearPath</h1>
           <p>서울 주요도로 실측 기반 경로와 카카오 경로를 비교합니다</p>
         </div>
 
