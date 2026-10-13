@@ -38,7 +38,7 @@ export async function GET(req: NextRequest) {
     return NextResponse.json({ detail: "이 구간은 주요도로 데이터가 없습니다" }, { status: 404 });
   }
 
-  const kakao = await fetchKakaoRoute(NODES[src.node], NODES[dst.node]);
+  const kakao = await fetchKakaoRoute(NODES[src.node], NODES[dst.node], dow, hour);
   const kakaoMatch = "error" in kakao ? null : matchKakaoRoute(kakao.coords, dow, hour);
 
   return NextResponse.json({

@@ -333,7 +333,6 @@ function RouteCard({
         <div>예상 소요 <b>{r.est_min}분</b></div>
         <div>늦어도 <b>{r.est_p90_min}분</b></div>
         <div>거리 <b>{r.dist_km}km</b></div>
-        <div>신호 교차로 <b>{r.signals}개</b></div>
       </div>
       <div className="roads-line">{r.roads.join(" · ")}</div>
       {footnote && <div className="roads-line">{footnote}</div>}

@@ -13,4 +13,4 @@ export const MATCH_COVERAGE_THRESHOLD_PCT = 65;
 
 export const SOURCE_NOTE =
   "소요시간은 서울시 TOPIS 택시 GPS 실측(2026.5~7월) 요일·시간대 프로파일을 LightGBM으로 보정한 예측치입니다. " +
-  "카카오 예상시간은 호출 시점 실시간 기준이라 참고용입니다.";
+  "카카오 예상시간은 선택한 요일·시간대에 맞춘 가장 가까운 미래 시점의 '미래 운행 정보 길찾기' 기준이라 참고용입니다.";
